@@ -1,0 +1,270 @@
+import React, { useState } from 'react';
+import { Search, MapPin, Users, Landmark, Wallet, Info, Loader2, Compass, Download } from 'lucide-react';
+import { motion, AnimatePresence } from 'motion/react';
+import { getMunicipalityInfo, MunicipalityData } from './services/geminiService';
+import { JapanMap } from './components/JapanMap';
+import ReactMarkdown from 'react-markdown';
+import { clsx, type ClassValue } from 'clsx';
+import { twMerge } from 'tailwind-merge';
+
+function cn(...inputs: ClassValue[]) {
+  return twMerge(clsx(inputs));
+}
+
+export default function App() {
+  const [query, setQuery] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [data, setData] = useState<MunicipalityData | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const handleDownload = () => {
+    if (!data) return;
+
+    // Use \r\n (CRLF) for better compatibility with Windows Notepad
+    const content = `【市町村レポート: ${data.name}】\r\n` +
+      `都道府県: ${data.prefecture}\r\n` +
+      `位置: ${data.location.description} (緯度: ${data.location.lat}, 経度: ${data.location.lng})\r\n\r\n` +
+      `■ 人口統計 (${data.population.year})\r\n` +
+      `総人口: ${data.population.total.toLocaleString()}人\r\n` +
+      `男: ${data.population.male.toLocaleString()}人\r\n` +
+      `女: ${data.population.female.toLocaleString()}人\r\n` +
+      `高齢化率: ${data.population.agingRate}%\r\n\r\n` +
+      `■ 予算規模 (${data.budget.year})\r\n` +
+      `金額: ${data.budget.amount}\r\n` +
+      `内容: ${data.budget.description}\r\n\r\n` +
+      `■ 観光・地域の特徴\r\n` +
+      `${data.tourism.replace(/\n/g, '\r\n')}\r\n\r\n` +
+      `■ ゆかりのある人物\r\n` +
+      `${data.famousPeople.map(p => `・${p.name}: ${p.description}`).join('\r\n')}\r\n\r\n` +
+      `----------------------------------\r\n` +
+      `作成日: ${new Date().toLocaleDateString('ja-JP')}\r\n` +
+      `出典: 市町村ナビ (AI推定値)\r\n`;
+
+    // Add UTF-8 BOM (\uFEFF) to prevent garbling in Windows Notepad
+    const bom = new Uint8Array([0xEF, 0xBB, 0xBF]);
+    const blob = new Blob([bom, content], { type: 'text/plain;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `${data.name}_レポート.txt`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  };
+
+  const performSearch = async (searchTerm: string) => {
+    if (!searchTerm.trim()) return;
+
+    setLoading(true);
+    setError(null);
+    try {
+      const result = await getMunicipalityInfo(searchTerm);
+      if (result) {
+        setData(result);
+      } else {
+        setError('市町村情報が見つかりませんでした。');
+      }
+    } catch (err) {
+      setError('エラーが発生しました。もう一度お試しください。');
+      console.error(err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleSearch = async (e: React.FormEvent) => {
+    e.preventDefault();
+    performSearch(query);
+  };
+
+  return (
+    <div className="min-h-screen bg-[#f8fafc] text-slate-900 font-sans selection:bg-emerald-100">
+      {/* Header */}
+      <header className="sticky top-0 z-50 bg-white/80 backdrop-blur-md border-b border-slate-200">
+        <div className="max-w-5xl mx-auto px-4 sm:px-6 py-3 sm:py-4 flex flex-col sm:flex-row items-center gap-4 sm:justify-between">
+          <div className="flex items-center gap-2 self-start sm:self-auto">
+            <div className="w-8 h-8 bg-emerald-500 rounded-lg flex items-center justify-center text-white shrink-0">
+              <Compass size={20} />
+            </div>
+            <h1 className="text-xl font-semibold tracking-tight whitespace-nowrap">市町村ナビ</h1>
+          </div>
+          
+          <form onSubmit={handleSearch} className="relative w-full sm:max-w-md">
+            <input
+              type="text"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="市町村名を入力 (例: 京都市)"
+              className="w-full pl-10 pr-16 py-2 bg-slate-100 border-none rounded-xl focus:ring-2 focus:ring-emerald-500/20 focus:bg-white transition-all outline-none text-sm"
+            />
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
+            <button 
+              type="submit"
+              disabled={loading}
+              className="absolute right-1.5 top-1/2 -translate-y-1/2 px-3 py-1 bg-emerald-500 text-white text-xs font-medium rounded-lg hover:bg-emerald-600 disabled:opacity-50 transition-colors"
+            >
+              {loading ? <Loader2 className="animate-spin" size={14} /> : '検索'}
+            </button>
+          </form>
+        </div>
+      </header>
+
+      <main className="max-w-5xl mx-auto px-4 sm:px-6 py-8 sm:py-12">
+        <AnimatePresence mode="wait">
+          {!data && !loading && !error && (
+            <motion.div
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -20 }}
+              className="text-center py-20"
+            >
+              <div className="inline-flex items-center justify-center w-20 h-20 bg-emerald-50 rounded-full mb-6">
+                <MapPin className="text-emerald-500" size={40} />
+              </div>
+              <h2 className="text-3xl font-bold mb-4">日本の市町村を探索しよう</h2>
+              <p className="text-slate-500 max-w-md mx-auto mb-8">
+                気になる市町村の名前を入力してください。地図上の位置、観光、有名人、予算、人口などの詳細情報をAIがまとめます。
+              </p>
+              <div className="flex flex-wrap justify-center gap-2 max-w-lg mx-auto">
+                {['京都市', '金沢市', '小豆島町', '白川村', '那覇市', '札幌市'].map((city) => (
+                  <button
+                    key={city}
+                    onClick={() => {
+                      setQuery(city);
+                      performSearch(city);
+                    }}
+                    className="px-4 py-2 bg-white border border-slate-200 rounded-full text-sm text-slate-600 hover:border-emerald-500 hover:text-emerald-500 transition-all shadow-sm cursor-pointer"
+                  >
+                    {city}
+                  </button>
+                ))}
+              </div>
+            </motion.div>
+          )}
+
+          {error && (
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              className="p-4 bg-red-50 border border-red-100 rounded-xl text-red-600 text-center"
+            >
+              {error}
+            </motion.div>
+          )}
+
+          {loading && (
+            <div className="flex flex-col items-center justify-center py-20 gap-4">
+              <Loader2 className="w-10 h-10 text-emerald-500 animate-spin" />
+              <p className="text-slate-500 font-medium animate-pulse">情報を収集中...</p>
+            </div>
+          )}
+
+          {data && !loading && (
+            <motion.div
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="grid grid-cols-1 lg:grid-cols-3 gap-8"
+            >
+              {/* Left Column: Basic Info & Map */}
+              <div className="lg:col-span-1 space-y-8">
+                <section className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200">
+                  <div className="flex items-baseline gap-2 mb-1">
+                    <h2 className="text-2xl font-bold">{data.name}</h2>
+                    <span className="text-slate-400 text-sm">{data.prefecture}</span>
+                  </div>
+                  <p className="text-sm text-slate-500 mb-6">{data.location.description}</p>
+                  
+                  <JapanMap lat={data.location.lat} lng={data.location.lng} />
+
+                  <button
+                    onClick={handleDownload}
+                    className="w-full mt-6 flex items-center justify-center gap-2 py-3 bg-slate-100 hover:bg-emerald-50 hover:text-emerald-600 text-slate-600 rounded-xl text-sm font-medium transition-all group"
+                  >
+                    <Download size={16} className="group-hover:translate-y-0.5 transition-transform" />
+                    レポートを保存 (メモ帳対応)
+                  </button>
+                </section>
+
+                <section className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200">
+                  <div className="flex items-center gap-2 mb-4">
+                    <Users className="text-emerald-500" size={20} />
+                    <h3 className="font-semibold">人口統計</h3>
+                    <span className="text-[10px] font-mono text-slate-400 ml-auto uppercase tracking-wider">{data.population.year}</span>
+                  </div>
+                  <div className="space-y-4">
+                    <div>
+                      <div className="text-3xl font-light tracking-tight">{data.population.total.toLocaleString()}</div>
+                      <div className="text-[10px] text-slate-400 uppercase font-bold tracking-widest">総人口</div>
+                    </div>
+                    <div className="grid grid-cols-2 gap-4 pt-4 border-t border-slate-100">
+                      <div>
+                        <div className="text-lg font-medium">{data.population.male.toLocaleString()}</div>
+                        <div className="text-[10px] text-slate-400 uppercase font-bold tracking-widest">男</div>
+                      </div>
+                      <div>
+                        <div className="text-lg font-medium">{data.population.female.toLocaleString()}</div>
+                        <div className="text-[10px] text-slate-400 uppercase font-bold tracking-widest">女</div>
+                      </div>
+                    </div>
+                    <div className="pt-4 border-t border-slate-100">
+                      <div className="text-xl font-medium text-emerald-600">{data.population.agingRate}%</div>
+                      <div className="text-[10px] text-slate-400 uppercase font-bold tracking-widest">高齢化率 (65歳以上)</div>
+                    </div>
+                  </div>
+                </section>
+
+                <section className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200">
+                  <div className="flex items-center gap-2 mb-4">
+                    <Wallet className="text-emerald-500" size={20} />
+                    <h3 className="font-semibold">予算規模</h3>
+                    <span className="text-[10px] font-mono text-slate-400 ml-auto uppercase tracking-wider">{data.budget.year}</span>
+                  </div>
+                  <div className="text-2xl font-light tracking-tight mb-2">{data.budget.amount}</div>
+                  <p className="text-xs text-slate-500 leading-relaxed">{data.budget.description}</p>
+                </section>
+              </div>
+
+              {/* Right Column: Content */}
+              <div className="lg:col-span-2 space-y-8">
+                <section className="bg-white p-8 rounded-2xl shadow-sm border border-slate-200">
+                  <div className="flex items-center gap-2 mb-6">
+                    <Landmark className="text-emerald-500" size={24} />
+                    <h3 className="text-xl font-bold">観光・地域の特徴</h3>
+                  </div>
+                  <div className="prose prose-slate prose-sm max-w-none">
+                    <ReactMarkdown>{data.tourism}</ReactMarkdown>
+                  </div>
+                </section>
+
+                <section className="bg-white p-8 rounded-2xl shadow-sm border border-slate-200">
+                  <div className="flex items-center gap-2 mb-6">
+                    <Info className="text-emerald-500" size={24} />
+                    <h3 className="text-xl font-bold">ゆかりのある人物</h3>
+                  </div>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    {data.famousPeople.map((person, idx) => (
+                      <div key={idx} className="p-4 bg-slate-50 rounded-xl border border-slate-100">
+                        <h4 className="font-bold text-emerald-700 mb-1">{person.name}</h4>
+                        <p className="text-xs text-slate-600 leading-relaxed">{person.description}</p>
+                      </div>
+                    ))}
+                  </div>
+                </section>
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+      </main>
+
+      <footer className="max-w-5xl mx-auto px-4 sm:px-6 py-8 sm:py-12 border-t border-slate-200">
+        <div className="flex flex-col md:flex-row justify-between items-center gap-4 text-slate-400 text-xs">
+          <p>© 2026 市町村ナビ - AI Generated Insights</p>
+          <div className="flex gap-6">
+            <span>データ出典: AI推定値 (各自治体公表資料に基づく)</span>
+          </div>
+        </div>
+      </footer>
+    </div>
+  );
+}
